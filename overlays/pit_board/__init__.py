@@ -1,6 +1,7 @@
 """Pit board: a relative (time gaps to the cars around you) that only appears when you need it.
 
-It shows while the pit limiter is on, or when you're stopped on track (after a spin, say),
+It shows while the pit limiter is on, when you go off track or lose control, or when you're
+stopped on track (after a spin, say),
 and stays a few seconds after so you can judge the gap as you rejoin. The rest of the time
 it's off the screen, like a real car with no relative box.
 
@@ -15,8 +16,8 @@ from PySide6.QtWidgets import QMenu, QWidget
 
 from core import winutil
 from overlays import base
-from .relative import (REASON_LIMITER, REASON_PEEK, REASON_PIT_ROAD, REASON_STOPPED, DemoRelative,
-                       Trigger, build_relative)
+from .relative import (REASON_LIMITER, REASON_OFF_TRACK, REASON_PEEK, REASON_PIT_ROAD, REASON_SPIN,
+                       REASON_STOPPED, DemoRelative, Trigger, build_relative)
 
 BASE_W = 360          # board width at 100 % size
 ROW_H = 30
@@ -25,7 +26,8 @@ PAD = 10
 FONT_FAMILIES = ["Bahnschrift SemiCondensed", "Bahnschrift", "Arial Narrow", "DIN Condensed", "Arial"]
 
 HEADINGS = {REASON_LIMITER: "PIT LIMITER", REASON_STOPPED: "STOPPED",
-            REASON_PIT_ROAD: "PIT LANE", REASON_PEEK: "RELATIVE"}
+            REASON_PIT_ROAD: "PIT LANE", REASON_PEEK: "RELATIVE",
+            REASON_OFF_TRACK: "OFF TRACK", REASON_SPIN: "SPIN"}
 
 
 def _font(px, bold=True):
@@ -242,6 +244,11 @@ class PitBoardOverlay(base.Overlay):
         "on_limiter": True,
         "on_stopped": True,
         "on_pit_road": False,
+        "on_off_track": True,
+        "off_track_for_s": 1.0,
+        "on_lost_control": True,
+        "slide_deg": 35.0,
+        "slide_for_s": 0.25,
         "stopped_kph": 3.0,
         "stopped_for_s": 0.7,
         "skip_grid": True,
@@ -265,7 +272,8 @@ class PitBoardOverlay(base.Overlay):
     }
     VARS = ("PlayerCarIdx", "Speed", "EngineWarnings", "OnPitRoad", "SessionState",
             "CarIdxLapDistPct", "CarIdxEstTime", "CarIdxLap", "CarIdxTrackSurface",
-            "CarIdxOnPitRoad", "CarIdxClassPosition")
+            "CarIdxOnPitRoad", "CarIdxClassPosition", "PlayerTrackSurface", "VelocityX", "VelocityY",
+            "Gear")
 
     def start(self):
         self.trigger = Trigger()
@@ -284,8 +292,9 @@ class PitBoardOverlay(base.Overlay):
     def settings_spec(self):
         return [
             base.check("enabled", "Use the pit-lane relative"),
-            base.note("A relative that only appears when you need it: on the pit limiter, or stopped "
-                      "on track. The rest of the time there's no relative on screen."),
+            base.note("A relative that only appears when you need it: on the pit limiter, off track, "
+                      "after losing control, or stopped on track. The rest of the time there's no "
+                      "relative on screen."),
             base.hotkey("hotkey", "Hide / show hotkey", "Hides it until you press it again or leave iRacing"),
             base.hotkey("peek_hotkey", "Quick look hotkey",
                         "Shows the pit board for a few seconds, like asking your engineer for gaps. "
@@ -294,6 +303,16 @@ class PitBoardOverlay(base.Overlay):
             base.button("Preview for 8 s", self.preview),
             base.header("When it appears"),
             base.check("on_limiter", "Pit limiter on"),
+            base.check("on_off_track", "Off track (all four wheels off)",
+                       "Two wheels over the line or on a kerb doesn't count, same as iRacing's 1x"),
+            base.decimal("off_track_for_s", "Off track for at least", 0, 5, 0.1, 1, " s",
+                         "Ignores a quick corner cut. Raise it if it still pops up when you clip a corner"),
+            base.check("on_lost_control", "Lost control (big slide or spin)",
+                       "Shows straight away in a spin, even if you stay on the track"),
+            base.decimal("slide_deg", "Counts as lost control at", 15, 90, 5, 0, "° sideways",
+                         "How far the car points away from where it's going. Normal hard driving "
+                         "stays well under 20°"),
+            base.decimal("slide_for_s", "Sliding for at least", 0, 2, 0.05, 2, " s"),
             base.check("on_stopped", "Stopped on track (after a spin, off at the side…)"),
             base.decimal("stopped_kph", "Counts as stopped below", 0.5, 30, 0.5, 1, " km/h"),
             base.decimal("stopped_for_s", "Stopped for at least", 0, 5, 0.1, 1, " s",

@@ -69,6 +69,10 @@ A hotkey hide lasts until you press it again or close iRacing. Change any hotkey
 ## Pit-lane relative (only when you need it)
 There's no relative on screen during green-flag racing. A pit board appears only when:
 - your **pit limiter** is on, or
+- you're **off track** (all four wheels off, the same as iRacing's 1x) for more than 1 s. Two wheels
+  over the line doesn't count, and a quick corner cut is ignored; change the time in Settings, or
+- you've **lost control**: the car is sliding more than 35° sideways for a quarter of a second, or
+  rolling backwards. This shows straight away in a spin, even if you never leave the track, or
 - you're **stopped on track** (after a spin, say) for about 0.7 s. Not while waiting on the grid.
 
 It stays up for 4 s after, so you can see the gaps while you rejoin or leave the pit lane.

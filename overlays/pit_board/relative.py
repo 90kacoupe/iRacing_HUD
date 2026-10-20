@@ -3,6 +3,9 @@ No Qt here, so it can be tested on its own.
 
 When it shows (any of these):
   * the pit speed limiter is on
+  * you're off track (all four wheels off, as iRacing counts it) for longer than a set time,
+    so cutting a corner by a hair doesn't bring it up
+  * you've lost control: the car is sliding well sideways or rolling backwards (a spin)
   * you're stopped on track (e.g. after a spin) for a moment
   * optionally: anywhere on pit road
 ...and it stays up for a few seconds after, so you can see the gap while you rejoin.
@@ -25,6 +28,41 @@ REASON_LIMITER = "limiter"
 REASON_STOPPED = "stopped"
 REASON_PIT_ROAD = "pit_road"
 REASON_PEEK = "peek"
+REASON_OFF_TRACK = "off_track"
+REASON_SPIN = "spin"
+
+SLIDE_MIN_KPH = 20.0      # below this, the slide angle isn't meaningful
+BACKWARDS_MPS = 1.0       # rolling backwards faster than this (not in reverse gear) = spun
+
+
+def slide_angle_deg(v):
+    """Angle between where the car points and where it's going, in degrees (0 = straight,
+    90 = fully sideways, 180 = backwards). None when it can't be worked out.
+    iRacing's VelocityX / VelocityY are in the car's own frame: X forward, Y left."""
+    import math
+    vx, vy = v.get("VelocityX"), v.get("VelocityY")
+    if vx is None or vy is None:
+        return None
+    if math.hypot(vx, vy) * 3.6 < SLIDE_MIN_KPH:
+        return None
+    return abs(math.degrees(math.atan2(vy, vx)))
+
+
+def rolling_backwards(v):
+    vx, gear = v.get("VelocityX"), v.get("Gear")
+    return vx is not None and vx < -BACKWARDS_MPS and gear != -1
+
+
+def my_surface(v):
+    s = v.get("PlayerTrackSurface")
+    if s is not None:
+        return s
+    me = v.get("PlayerCarIdx")
+    surf = v.get("CarIdxTrackSurface")
+    try:
+        return surf[me]
+    except Exception:
+        return None
 
 
 def wrap(d, period):
@@ -39,6 +77,8 @@ class Trigger:
 
     def __init__(self):
         self.stopped_since = None
+        self.off_since = None
+        self.slide_since = None
         self.last_reason = None
         self.linger_until = 0.0
         self.peek_until = 0.0
@@ -48,18 +88,33 @@ class Trigger:
 
     def reset(self):
         self.stopped_since = None
+        self.off_since = None
+        self.slide_since = None
         self.last_reason = None
         self.linger_until = 0.0
 
     def live_reason(self, v, cfg, now):
         """Why it should show right now, or None. v = telemetry vars."""
+        on_pit_road = bool(v.get("OnPitRoad"))
+        # Timers run every frame, whichever reason wins, so they don't restart.
+        off = my_surface(v) == SURF_OFF_TRACK and not on_pit_road
+        self.off_since = (self.off_since if self.off_since is not None else now) if off else None
+        angle = slide_angle_deg(v)
+        sliding = rolling_backwards(v) or (angle is not None and angle >= float(cfg["slide_deg"]))
+        self.slide_since = (self.slide_since if self.slide_since is not None else now) if sliding else None
+
         if cfg["on_limiter"] and (v.get("EngineWarnings") or 0) & LIMITER_BIT:
             self.stopped_since = None
             return REASON_LIMITER
-        on_pit_road = bool(v.get("OnPitRoad"))
         if cfg["on_pit_road"] and on_pit_road:
             self.stopped_since = None
             return REASON_PIT_ROAD
+        if cfg["on_lost_control"] and self.slide_since is not None \
+                and now - self.slide_since >= float(cfg["slide_for_s"]):
+            return REASON_SPIN
+        if cfg["on_off_track"] and self.off_since is not None \
+                and now - self.off_since >= float(cfg["off_track_for_s"]):
+            return REASON_OFF_TRACK
         speed = v.get("Speed")
         stopped = speed is not None and abs(speed) * 3.6 <= float(cfg["stopped_kph"])
         if cfg["on_stopped"] and stopped and not on_pit_road:
