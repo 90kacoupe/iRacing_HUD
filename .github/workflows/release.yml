@@ -1,0 +1,84 @@
+# Builds the Windows installer and publishes it as a GitHub release.
+# Every installed copy of the HUD checks these releases and offers the update.
+#
+# To release: GitHub → Actions → "Release" → Run workflow → type the new version and what's new.
+# (Pushing a tag like v1.2.3 also works.)
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "New version number, e.g. 1.1.0"
+        required: true
+      notes:
+        description: "What's new (shown in the update popup)"
+        required: true
+        default: "Fixes and improvements."
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if ("${{ github.event_name }}" -eq "push") { $v = "${{ github.ref_name }}" } else { $v = $env:INPUT_VERSION }
+          $v = $v.Trim().TrimStart('v', 'V')
+          if ($v -notmatch '^\d+\.\d+\.\d+$') { throw "The version must look like 1.2.3 (got '$v')." }
+          if ("${{ github.event_name }}" -ne "push" -and (git tag -l "v$v")) { throw "v$v has already been released. Pick a higher number." }
+          (Get-Content core/version.py) -replace 'VERSION = ".*"', "VERSION = `"$v`"" | Set-Content core/version.py
+          "VERSION=$v" >> $env:GITHUB_ENV
+          Get-Content core/version.py
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: python -m pip install --upgrade pip pyinstaller pyirsdk PySide6
+
+      - name: Build the app
+        run: pyinstaller packaging/SimRacingHUD.spec --noconfirm --distpath dist --workpath build
+
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
+          & $iscc "/DAppVersion=$env:VERSION" packaging\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "Installer build failed" }
+          Get-ChildItem dist\*.exe
+
+      - name: Save the version number and tag it
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add core/version.py
+          git diff --cached --quiet; if ($LASTEXITCODE -ne 0) { git commit -m "Release v$env:VERSION" }
+          git tag "v$env:VERSION"
+          git push origin "HEAD:${{ github.ref_name }}" "v$env:VERSION"
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Sim Racing HUD ${{ env.VERSION }}
+          body: ${{ github.event_name == 'workflow_dispatch' && inputs.notes || 'Fixes and improvements.' }}
+          files: dist/SimRacingHUD-Setup-*.exe
+          make_latest: true

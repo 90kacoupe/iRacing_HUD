@@ -1,0 +1,12 @@
+# Personal settings and logs never go in the repo
+config.json
+config.broken.json
+*.tmp
+hud.log
+hud.log.old
+
+# Python / build output
+__pycache__/
+*.pyc
+build/
+dist/

@@ -1,0 +1,435 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LMP3 Dash</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  /* Canvas: 64px shift-light bar + 800x443 screen (same shape as the in-car display) */
+  #stage { position: absolute; left: 0; top: 0; width: 800px; height: 507px; transform-origin: 0 0; background: #000;
+           color: #d8d8d8; font-family: Bahnschrift, "DIN Alternate", "Arial Narrow", Arial, sans-serif;
+           user-select: none; cursor: default; }
+  #leds { position: absolute; left: 0; top: 0; width: 800px; height: 64px; display: flex;
+          justify-content: center; align-items: center; gap: 24px; }
+  .led { width: 34px; height: 34px; border-radius: 50%; background: #262626; border: 3px solid #333; box-sizing: border-box; }
+  #screen { position: absolute; left: 0; top: 64px; width: 800px; height: 443px; }
+  #main { position: absolute; inset: 0; background: #1b1b1d; border: 3px solid #9c9c9c; border-radius: 10px; box-sizing: border-box; }
+  .box { position: absolute; border: 4px solid #a9a9a9; box-sizing: border-box; }
+  .lbl { position: absolute; font-size: 15px; color: #d4d4d4; letter-spacing: .5px; white-space: nowrap; }
+  .val { position: absolute; white-space: nowrap; font-variant-numeric: tabular-nums; letter-spacing: 3px; }
+  .c { text-align: center; }
+  .r { text-align: right; }
+  #status { position: absolute; right: 12px; bottom: 8px; font-size: 12px; color: #888; }
+  #debug { position: absolute; left: 0; top: 0; width: 800px; height: 507px; overflow: auto; background: rgba(0,0,0,.92);
+           color: #9f9; font: 12px Consolas, monospace; padding: 10px; box-sizing: border-box; display: none; white-space: pre; }
+  /* Pit limiter page */
+  #pit { position: absolute; inset: 0; background: #2b33b0; border-radius: 10px; display: none; }
+  #pit .pnl { position: absolute; background: #121216; border-radius: 6px; }
+  #pit .mbox { position: absolute; border: 4px solid; border-radius: 6px; box-sizing: border-box; background: #121216; }
+  #pit .val { letter-spacing: 1px; }
+  #pitBanner { position: absolute; left: 8px; top: 308px; width: 784px; height: 125px; background: #5a61d4;
+               border: 3px solid #8a90ee; border-radius: 6px; box-sizing: border-box; color: #b9bdf7;
+               font-size: 60px; letter-spacing: 3px; display: flex; align-items: center; justify-content: center; }
+  .stage-pit #main { display: none; }
+  .stage-pit #pit { display: block; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="leds"></div>
+  <div id="screen">
+
+  <!-- NORMAL PAGE (laid out from inputs/lmp3-dash-main.png) -->
+  <div id="main">
+    <div class="box" style="left:12px;top:10px;width:301px;height:94px"></div>
+    <div class="lbl" style="left:22px;top:18px">LAST</div>
+    <div class="val r" id="last" style="left:70px;top:30px;width:232px;font-size:44px;color:#3f5bd6">-:--.--</div>
+
+    <div class="box" style="left:309px;top:10px;width:172px;height:139px"></div>
+    <div class="val c" id="gear" style="left:309px;top:8px;width:172px;font-size:132px;line-height:142px;letter-spacing:0">N</div>
+
+    <div class="box" style="left:477px;top:10px;width:308px;height:94px"></div>
+    <div class="lbl" style="left:488px;top:18px">BEST</div>
+    <div class="val r" id="best" style="left:536px;top:30px;width:238px;font-size:44px;color:#c44ec4">-:--.--</div>
+
+    <div class="box" style="left:309px;top:145px;width:172px;height:56px"></div>
+    <div class="val c" id="rpm" style="left:309px;top:148px;width:172px;font-size:38px">0</div>
+
+    <div class="lbl" style="left:28px;top:132px">FUEL USED</div>
+    <div class="val r" id="fuelUsed" style="left:150px;top:120px;width:110px;font-size:34px">0.00</div>
+    <div class="lbl" style="left:28px;top:194px">FUEL LAP</div>
+    <div class="val r" id="fuelLap" style="left:150px;top:182px;width:110px;font-size:34px">0.00</div>
+
+    <div class="lbl" style="left:490px;top:124px">DIFF</div>
+    <div class="val r" id="diff" style="left:560px;top:116px;width:210px;font-size:34px">&nbsp;</div>
+
+    <div class="box" style="left:273px;top:205px;width:240px;height:120px"></div>
+    <div class="val" id="tfl" style="left:284px;top:212px;font-size:34px;letter-spacing:2px">--.-</div>
+    <div class="val r" id="tfr" style="left:400px;top:212px;width:102px;font-size:34px;letter-spacing:2px">--.-</div>
+    <div class="lbl c" style="left:273px;top:253px;width:240px;font-size:17px">Tyre Press</div>
+    <div class="val" id="trl" style="left:284px;top:276px;font-size:34px;letter-spacing:2px">--.-</div>
+    <div class="val r" id="trr" style="left:400px;top:276px;width:102px;font-size:34px;letter-spacing:2px">--.-</div>
+
+    <div class="lbl c" style="left:600px;top:206px;width:120px">SPEED</div>
+    <div class="val c" id="speed" style="left:580px;top:236px;width:180px;font-size:72px;letter-spacing:2px">0</div>
+
+    <div class="lbl c" style="left:22px;top:346px;width:120px">OIL P</div>
+    <div class="val c" id="oil" style="left:14px;top:368px;width:140px;font-size:46px">0.0</div>
+
+    <div class="box" style="left:158px;top:334px;width:108px;height:96px;border-color:#c9c27a"></div>
+    <div class="lbl c" style="left:158px;top:344px;width:108px">TC</div>
+    <div class="val c" id="tc" style="left:158px;top:370px;width:108px;font-size:42px;color:#e2dd9e;letter-spacing:0">-</div>
+
+    <div class="box" style="left:314px;top:334px;width:168px;height:84px;border-color:#a3804e"></div>
+    <div class="lbl c" style="left:314px;top:344px;width:168px">RAIN LIGHT</div>
+    <div class="val c" id="rain" style="left:314px;top:366px;width:168px;font-size:36px;color:#6cc46c">OFF</div>
+
+    <div class="box" style="left:514px;top:334px;width:108px;height:96px;border-color:#c43fc4"></div>
+    <div class="lbl c" style="left:514px;top:344px;width:108px">PPS</div>
+    <div class="val c" id="pps" style="left:514px;top:370px;width:108px;font-size:42px;color:#d978d9;letter-spacing:0">-</div>
+
+    <div class="lbl c" style="left:648px;top:346px;width:120px">WATER T</div>
+    <div class="val c" id="water" style="left:640px;top:368px;width:136px;font-size:46px">0</div>
+  </div>
+
+  <!-- PIT LIMITER PAGE (shown while the pit limiter is on; from inputs/lmp3-dash-pit-limiter.png) -->
+  <div id="pit">
+    <div class="pnl" style="left:8px;top:11px;width:140px;height:70px"></div>
+    <div class="mbox" style="left:8px;top:87px;width:140px;height:100px;border-color:#b08a4a">
+      <div class="lbl c" style="left:0;top:6px;width:132px;font-size:16px">RAIN LIGHT</div>
+      <div class="val c" id="pRain" style="left:0;top:32px;width:132px;font-size:38px;color:#3ccf5a">OFF</div>
+    </div>
+    <div class="mbox" style="left:8px;top:194px;width:140px;height:103px;border-color:#d8d38a">
+      <div class="lbl c" style="left:0;top:6px;width:132px;font-size:16px">TC MAP</div>
+      <div class="val c" id="pTc" style="left:0;top:32px;width:132px;font-size:42px;color:#e8e2a0">-</div>
+    </div>
+
+    <div class="pnl" style="left:156px;top:11px;width:146px;height:138px"></div>
+    <div class="val c" id="pGear" style="left:156px;top:2px;width:146px;font-size:128px;line-height:148px;color:#bdbdbd">N</div>
+
+    <div class="pnl" style="left:310px;top:11px;width:314px;height:138px"></div>
+    <div class="lbl" style="left:322px;top:18px;font-size:17px">SPEED</div>
+    <div class="val r" id="pSpeed" style="left:330px;top:30px;width:276px;font-size:104px;line-height:112px;color:#d0d0d0">0</div>
+
+    <div class="pnl" style="left:632px;top:11px;width:160px;height:176px"></div>
+    <div class="lbl c" style="left:632px;top:108px;width:160px;font-size:17px">WATER T</div>
+    <div class="val c" id="pWater" style="left:632px;top:128px;width:160px;font-size:44px">0</div>
+    <div class="mbox" style="left:640px;top:194px;width:152px;height:103px;border-color:#d040d0">
+      <div class="lbl c" style="left:0;top:6px;width:144px;font-size:16px">PPS MAP</div>
+      <div class="val c" id="pPps" style="left:0;top:32px;width:144px;font-size:42px;color:#e070e0">-</div>
+    </div>
+
+    <div class="pnl" style="left:156px;top:157px;width:254px;height:140px"></div>
+    <div class="lbl" style="left:168px;top:177px;font-size:16px">FUEL USED</div>
+    <div class="val r" id="pFuel" style="left:290px;top:166px;width:108px;font-size:34px">0.00</div>
+    <div class="lbl" style="left:168px;top:221px;font-size:16px">BRAKE BALANCE</div>
+    <div class="val r" id="pBias" style="left:300px;top:210px;width:98px;font-size:34px">-</div>
+    <div class="lbl" style="left:168px;top:266px;font-size:16px">PEDAL (%)</div>
+    <div class="val r" id="pPedal" style="left:300px;top:255px;width:98px;font-size:34px">-</div>
+
+    <div class="pnl" style="left:418px;top:157px;width:206px;height:140px"></div>
+    <div class="lbl c" style="left:418px;top:164px;width:206px;font-size:17px">Tyre Press</div>
+    <div class="val" id="pTfl" style="left:430px;top:188px;font-size:34px">--.-</div>
+    <div class="val r" id="pTfr" style="left:520px;top:188px;width:92px;font-size:34px">--.-</div>
+    <div class="val" id="pTrl" style="left:430px;top:242px;font-size:34px">--.-</div>
+    <div class="val r" id="pTrr" style="left:520px;top:242px;width:92px;font-size:34px">--.-</div>
+
+    <div id="pitBanner">PIT LIMIT ACTIVE</div>
+  </div>
+
+  </div>
+  <div id="status">Waiting for iRacing…</div>
+  <div id="debug"></div>
+</div>
+
+<script>
+// ---------- Settings ----------
+var CONFIG = {
+  dataUrl: '/data',        // served by dash_overlay.py from iRacing telemetry
+  pollMs: 33,              // ~30 updates per second
+  ledCount: 10,
+  ledColors: function (n) { // n = 1..10
+    if (n <= 4) return '#2FD14A';
+    if (n <= 7) return '#FFC61A';
+    return '#FF3030';
+  },
+  shiftFlashColor: '#3A7BFF'
+};
+
+var params = new URLSearchParams(location.search);
+var DEMO = params.has('demo');
+var DEBUG = params.has('debug');
+var FORCE_PIT = params.has('pit');   // dash.html?demo&pit previews the pit limiter page
+
+// ---------- Fit the dash to the window ----------
+var DASH_W = 800, DASH_H = 507;
+function fit() {
+  var s = Math.min(window.innerWidth / DASH_W, window.innerHeight / DASH_H);
+  var st = document.getElementById('stage');
+  st.style.transform = 'scale(' + s + ')';
+  st.style.left = ((window.innerWidth - DASH_W * s) / 2) + 'px';
+  st.style.top = ((window.innerHeight - DASH_H * s) / 2) + 'px';
+}
+window.addEventListener('resize', fit); fit();
+// In the overlay window, make the window the same shape as this dash (no empty bars at the sides).
+window.addEventListener('pywebviewready', function () {
+  if (window.pywebview.api.set_aspect) window.pywebview.api.set_aspect(DASH_W, DASH_H);
+});
+
+// ---------- Shift light elements ----------
+var leds = [];
+(function () {
+  var host = document.getElementById('leds');
+  for (var i = 0; i < CONFIG.ledCount; i++) {
+    var d = document.createElement('div'); d.className = 'led'; host.appendChild(d); leds.push(d);
+  }
+})();
+
+// ---------- Finding values in the data ----------
+// Each value is looked up by name and its location remembered.
+var WANTED = {
+  rpm: ['Rpms', 'RPM'],
+  maxRpm: ['MaxRpm'],
+  gear: ['Gear'],
+  speed: ['Speed'],
+  last: ['LastLapTime', 'LapLastLapTime'],
+  best: ['BestLapTime', 'LapBestLapTime'],
+  fuel: ['Fuel', 'FuelLevel'],
+  laps: ['CompletedLaps', 'LapCompleted'],
+  oil: ['OilPressure', 'OilPress'],
+  water: ['WaterTemperature', 'WaterTemp'],
+  tfl: ['TyrePressureFrontLeft', 'LFcoldPressure'],
+  tfr: ['TyrePressureFrontRight', 'RFcoldPressure'],
+  trl: ['TyrePressureRearLeft', 'LRcoldPressure'],
+  trr: ['TyrePressureRearRight', 'RRcoldPressure'],
+  delta: ['LapDeltaToSessionBestLap', 'SessionBestLiveDeltaSeconds', 'DeltaToSessionBest'],
+  tc: ['dcTractionControl'],
+  pps: ['dcThrottleShape'],
+  rain: [/rain.?light/i],
+  slFirst: ['DriverCarSLFirstRPM'],
+  slLast: ['DriverCarSLLastRPM'],
+  slBlink: ['DriverCarSLBlinkRPM'],
+  pit: ['PitLimiter'],
+  bias: ['BrakeBias', 'dcBrakeBias'],
+  pedal: ['ThrottlePct']
+};
+var paths = {};
+var lastIndex = 0;
+
+function indexPayload(root) {
+  var found = {};
+  var queue = [{ o: root, p: [] }];
+  var seen = 0;
+  while (queue.length && seen < 20000) {
+    var it = queue.shift(); seen++;
+    var o = it.o;
+    if (!o || typeof o !== 'object' || Array.isArray(o)) continue;
+    for (var k in o) {
+      if (!Object.prototype.hasOwnProperty.call(o, k)) continue;
+      var p = it.p.concat(k);
+      var kl = k.toLowerCase();
+      if (!(kl in found)) found[kl] = p;
+      if (o[k] && typeof o[k] === 'object' && !Array.isArray(o[k]) && p.length < 7) queue.push({ o: o[k], p: p });
+    }
+  }
+  for (var name in WANTED) {
+    if (paths[name]) continue;
+    var opts = WANTED[name];
+    for (var i = 0; i < opts.length && !paths[name]; i++) {
+      var opt = opts[i];
+      if (opt instanceof RegExp) {
+        for (var kk in found) { if (opt.test(kk)) { paths[name] = found[kk]; break; } }
+      } else if (found[opt.toLowerCase()]) {
+        paths[name] = found[opt.toLowerCase()];
+      }
+    }
+  }
+}
+
+function read(root, name) {
+  var p = paths[name]; if (!p) return undefined;
+  var o = root;
+  for (var i = 0; i < p.length; i++) { if (o == null) return undefined; o = o[p[i]]; }
+  return o;
+}
+
+// ---------- Formatting helpers ----------
+function num(v) {
+  if (v == null || v === '') return NaN;
+  if (typeof v === 'boolean') return v ? 1 : 0;
+  return Number(v);
+}
+function toSeconds(v) {
+  if (v == null) return NaN;
+  if (typeof v === 'number') return v;
+  if (typeof v === 'object') {
+    if ('TotalSeconds' in v) return v.TotalSeconds;
+    if ('TotalMilliseconds' in v) return v.TotalMilliseconds / 1000;
+  }
+  if (typeof v === 'string') {
+    var parts = v.split(':');           // "00:01:42.3810000"
+    var s = 0;
+    for (var i = 0; i < parts.length; i++) s = s * 60 + parseFloat(parts[i]);
+    return s;
+  }
+  return NaN;
+}
+function lapTime(v) {
+  var s = toSeconds(v);
+  if (!isFinite(s) || s <= 0) return '-:--.--';
+  var m = Math.floor(s / 60), r = s - m * 60;
+  return m + ':' + (r < 10 ? '0' : '') + r.toFixed(2);
+}
+function fixed(v, d) { var n = num(v); return isFinite(n) ? n.toFixed(d) : '-'; }
+function setText(id, t) { var el = document.getElementById(id); if (el.textContent !== t) el.textContent = t; }
+
+// ---------- Fuel tracking ----------
+var fuelState = { lap: null, startFuel: null, lastLap: 0 };
+function updateFuel(fuel, laps) {
+  if (!isFinite(fuel)) return;
+  if (fuelState.startFuel === null || fuel > fuelState.startFuel + 0.5) { // first read or refuel
+    fuelState.startFuel = fuel; fuelState.lap = laps;
+  }
+  if (isFinite(laps) && laps !== fuelState.lap) {
+    if (fuelState.lap !== null && laps === fuelState.lap + 1) fuelState.lastLap = fuelState.startFuel - fuel;
+    fuelState.startFuel = fuel; fuelState.lap = laps;
+  }
+  setText('fuelUsed', Math.max(0, fuelState.startFuel - fuel).toFixed(2));
+  setText('fuelLap', Math.max(0, fuelState.lastLap).toFixed(2));
+}
+
+// ---------- Shift lights ----------
+function updateLeds(rpm, first, last, blink, maxRpm) {
+  if (!(first > 0 && last > first)) {                // fallback if iRacing's values aren't available
+    if (maxRpm > 0) { first = maxRpm * 0.80; last = maxRpm * 0.96; blink = maxRpm * 0.98; }
+    else { first = last = blink = Infinity; }
+  }
+  if (!(blink > 0)) blink = last;
+  var flashOn = Math.floor(Date.now() / 120) % 2 === 0;
+  for (var i = 0; i < leds.length; i++) {
+    var n = i + 1, c = null;
+    if (rpm >= blink) c = flashOn ? CONFIG.shiftFlashColor : null;
+    else if (rpm >= first + (last - first) * (n - 1) / (leds.length - 1)) c = CONFIG.ledColors(n);
+    var bg = c || '#262626', bd = c || '#333';
+    if (leds[i].style.backgroundColor !== bg) { leds[i].style.background = bg; leds[i].style.borderColor = bd; }
+  }
+}
+
+// ---------- Render one frame ----------
+function render(d) {
+  var rpm = num(read(d, 'rpm')) || 0;
+  setText('rpm', Math.round(rpm).toString());
+  var g = read(d, 'gear'); setText('gear', g == null || g === '' ? 'N' : String(g));
+  setText('speed', fixed(read(d, 'speed'), 0));
+  setText('last', lapTime(read(d, 'last')));
+  setText('best', lapTime(read(d, 'best')));
+
+  var delta = num(read(d, 'delta'));
+  var diffEl = document.getElementById('diff');
+  if (isFinite(delta) && delta !== 0) {
+    setText('diff', (delta > 0 ? '+' : '') + delta.toFixed(2));
+    diffEl.style.color = delta < 0 ? '#3CCF5A' : '#FF4040';
+  } else { setText('diff', ''); }
+
+  updateFuel(num(read(d, 'fuel')), num(read(d, 'laps')));
+  setText('tfl', fixed(read(d, 'tfl'), 1)); setText('tfr', fixed(read(d, 'tfr'), 1));
+  setText('trl', fixed(read(d, 'trl'), 1)); setText('trr', fixed(read(d, 'trr'), 1));
+  setText('oil', fixed(read(d, 'oil'), 1));
+  setText('water', fixed(read(d, 'water'), 0));
+
+  var tc = read(d, 'tc'); setText('tc', tc == null ? '-' : String(Math.round(num(tc))));
+  var pps = read(d, 'pps'); setText('pps', pps == null ? '-' : String(Math.round(num(pps))));
+  var rain = read(d, 'rain'); var rainOn = num(rain) > 0;
+  setText('rain', rain == null ? '-' : (rainOn ? 'ON' : 'OFF'));
+  document.getElementById('rain').style.color = rainOn ? '#FF4040' : '#3CCF5A';
+
+  // Pit limiter page
+  var pitOn = num(read(d, 'pit')) > 0 || FORCE_PIT;
+  var stage = document.getElementById('stage');
+  if (pitOn !== stage.classList.contains('stage-pit')) stage.classList.toggle('stage-pit', pitOn);
+  if (pitOn) {
+    setText('pGear', document.getElementById('gear').textContent);
+    setText('pSpeed', document.getElementById('speed').textContent);
+    setText('pFuel', document.getElementById('fuelUsed').textContent);
+    setText('pBias', fixed(read(d, 'bias'), 1));
+    setText('pPedal', fixed(read(d, 'pedal'), 1));
+    setText('pWater', document.getElementById('water').textContent);
+    setText('pTc', document.getElementById('tc').textContent);
+    setText('pPps', document.getElementById('pps').textContent);
+    setText('pRain', document.getElementById('rain').textContent);
+    document.getElementById('pRain').style.color = document.getElementById('rain').style.color;
+    ['tfl', 'tfr', 'trl', 'trr'].forEach(function (k) {
+      setText('p' + k.charAt(0).toUpperCase() + k.slice(1), document.getElementById(k).textContent);
+    });
+  }
+
+  updateLeds(rpm, num(read(d, 'slFirst')), num(read(d, 'slLast')), num(read(d, 'slBlink')), num(read(d, 'maxRpm')));
+}
+
+function showDebug(d) {
+  var lines = ['DEBUG — values received from iRacing (press D to hide)', ''];
+  for (var name in WANTED) {
+    var v = read(d, name);
+    lines.push((name + '            ').slice(0, 10) + (paths[name] ? paths[name].join('.') + '  =  ' + JSON.stringify(v) : '(not found)'));
+  }
+  var el = document.getElementById('debug'); el.style.display = 'block'; el.textContent = lines.join('\n');
+}
+
+// ---------- Data loop ----------
+var busy = false, lastOk = 0;
+function poll() {
+  if (busy) return; busy = true;
+  fetch(CONFIG.dataUrl, { cache: 'no-store' })
+    .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(function (d) {
+      var missing = Object.keys(WANTED).some(function (k) { return !paths[k]; });
+      if (missing && Date.now() - lastIndex > 2000) { indexPayload(d); lastIndex = Date.now(); }
+      render(d);
+      if (DEBUG) showDebug(d);
+      lastOk = Date.now();
+    })
+    .catch(function () {})
+    .then(function () {
+      busy = false;
+      var st = document.getElementById('status');
+      st.style.display = Date.now() - lastOk < 1500 ? 'none' : 'block';
+    });
+}
+
+// ---------- Demo mode (open dash.html?demo) ----------
+var demo = { rpm: 4200, gear: 2, lap: 3, fuel: 40, t0: Date.now() };
+function demoFrame() {
+  demo.rpm += 70;
+  if (demo.rpm > 7350) { demo.rpm = 5200; demo.gear = demo.gear < 6 ? demo.gear + 1 : 2; }
+  demo.fuel -= 0.0006;
+  var el = (Date.now() - demo.t0) / 1000;
+  return {
+    Rpms: demo.rpm, MaxRpm: 7500, Gear: String(demo.gear), Speed: demo.rpm / 45 + demo.gear * 14,
+    LastLapTime: '00:01:42.3810000', BestLapTime: '00:01:41.9520000', Fuel: demo.fuel,
+    CompletedLaps: demo.lap + Math.floor(el / 20), OilPressure: 16.5, WaterTemperature: 166,
+    TyrePressureFrontLeft: 26.9, TyrePressureFrontRight: 26.9, TyrePressureRearLeft: 26.9, TyrePressureRearRight: 26.9,
+    LapDeltaToSessionBestLap: Math.sin(el / 4) * 0.6, PitLimiter: Math.floor(el / 12) % 2 === 1, BrakeBias: 59.0, ThrottlePct: 0.4, dcTractionControl: 3, dcThrottleShape: 4, dcRainLight: 0,
+    DriverCarSLFirstRPM: 5600, DriverCarSLLastRPM: 7000, DriverCarSLBlinkRPM: 7200
+  };
+}
+
+if (DEMO) {
+  document.getElementById('status').style.display = 'none';
+  setInterval(function () { var d = demoFrame(); if (!paths.rpm) indexPayload(d); render(d); if (DEBUG) showDebug(d); }, CONFIG.pollMs);
+} else {
+  setInterval(poll, CONFIG.pollMs);
+}
+
+// ---------- Window controls when running in the overlay launcher ----------
+// + / - resize, D toggles debug view, Ctrl+Q quits. Esc is deliberately unused (iRacing uses it).
+document.addEventListener('keydown', function (e) {
+  var api = window.pywebview && window.pywebview.api;
+  if (e.ctrlKey && (e.key === 'q' || e.key === 'Q') && api) { api.quit(); return; }
+  if ((e.key === '+' || e.key === '=') && api) api.scale(1.1);
+  if (e.key === '-' && api) api.scale(1 / 1.1);
+  if (e.key === 'd' || e.key === 'D') { DEBUG = !DEBUG; if (!DEBUG) document.getElementById('debug').style.display = 'none'; }
+});
+</script>
+</body>
+</html>
