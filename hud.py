@@ -39,13 +39,50 @@ def setup_log():
         sys.stdout = sys.stderr = Null()
 
 
+def self_test():
+    """Exit code 0 if every overlay (and the web view the dash needs) loads. Writes self-test.txt
+    next to the exe, because the installed app has no console."""
+    lines, ok = [], True
+    try:
+        from overlays import OVERLAYS, load_overlay_classes
+        classes, errors = load_overlay_classes()
+        lines.append(f"overlays loaded: {[c.__name__ for c in classes]}")
+        if errors or len(classes) != len(OVERLAYS):
+            ok = False
+            lines.append(f"overlays FAILED: {errors}")
+        import PySide6.QtWebEngineWidgets  # noqa: F401
+        import ui.settings  # noqa: F401
+        import irsdk  # noqa: F401
+        lines.append("Qt web view, settings and pyirsdk: ok")
+    except Exception:
+        ok = False
+        lines.append(traceback.format_exc())
+    lines.append("SELF-TEST PASSED" if ok else "SELF-TEST FAILED")
+    text = "\n".join(lines)
+    try:
+        with open(os.path.join(os.path.dirname(sys.executable if getattr(sys, "frozen", False) else
+                                               os.path.abspath(__file__)), "self-test.txt"),
+                  "w", encoding="utf-8") as f:
+            f.write(text + "\n")
+    except Exception:
+        pass
+    if sys.stdout is not None:
+        print(text)
+    return 0 if ok else 1
+
+
 def main():
     from core.version import VERSION
     ap = argparse.ArgumentParser(description=f"Sim Racing HUD {VERSION}")
     ap.add_argument("--demo", action="store_true", help="simulated data, no iRacing needed")
     ap.add_argument("--install-startup", action="store_true")
     ap.add_argument("--remove-startup", action="store_true")
+    ap.add_argument("--self-test", action="store_true",
+                    help="check every overlay and Qt module loads, then exit (used by the release build)")
     args = ap.parse_args()
+
+    if args.self_test:
+        return self_test()
 
     from core import winutil
     if args.install_startup:

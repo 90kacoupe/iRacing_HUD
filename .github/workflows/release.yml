@@ -54,6 +54,14 @@ jobs:
       - name: Build the app
         run: pyinstaller packaging/SimRacingHUD.spec --noconfirm --distpath dist --workpath build
 
+      - name: Check the built app has every overlay
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath dist\SimRacingHUD\SimRacingHUD.exe -ArgumentList "--self-test" -Wait -PassThru
+          Get-Content dist\SimRacingHUD\self-test.txt
+          Remove-Item dist\SimRacingHUD\self-test.txt
+          if ($p.ExitCode -ne 0) { throw "The built app is missing something (see above). Not releasing it." }
+
       - name: Build the installer
         shell: pwsh
         run: |
