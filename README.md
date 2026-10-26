@@ -61,6 +61,9 @@ A hotkey hide lasts until you press it again or close iRacing. Change any hotkey
   (iRacing doesn't give the side-to-side gap between cars, so that can't be shown.) Colour-by-overlap
   and grow-when-close are optional. Change size, slide distance, colours etc. in
   Settings → Side indicator.
+  It stays on the monitor you pick in Settings even if Windows starts on another screen: it's
+  placed again every time you go on track and whenever a screen is switched on, off or changed,
+  and the chosen monitor is remembered by its identity, not its number in the list.
   **Dash lights style:** set *Indicator style* to *Dash lights* for a race-car style warning-light module
   on each edge instead. The lamps simply light amber while a car is alongside on that side, with no
   position shown. Choose round LEDs or rectangular bars, the number of lamps, size, colour and height,

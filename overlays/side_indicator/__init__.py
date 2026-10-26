@@ -15,8 +15,8 @@ overlap or grow it when door to door.
 import math
 import time
 
-from PySide6.QtCore import Qt, QPointF, QRectF
-from PySide6.QtGui import QColor, QPen, QPainter, QPolygonF, QAction, QRadialGradient
+from PySide6.QtCore import Qt, QPointF, QRect, QRectF, QTimer
+from PySide6.QtGui import QColor, QPen, QPainter, QPolygonF, QAction, QRadialGradient, QGuiApplication
 from PySide6.QtWidgets import QApplication, QWidget
 
 from core import winutil
@@ -80,7 +80,20 @@ class SideMarker(QWidget):
         lw = size * (1.6 if c["lights_shape"] == "bar" else 1.0)
         return lw + 2 * bez, n * size + (n - 1) * gap + 2 * bez, size * 0.6
 
-    def place(self, geo):
+    def place(self, screen):
+        """Put this marker on its edge of `screen`. Returns the rect used."""
+        rect = self._rect_for(screen.geometry())
+        # Tell Qt which screen first, so the position is converted with that screen's
+        # scaling (a window created on a smaller / differently scaled screen otherwise
+        # lands in the wrong spot until it's placed a second time).
+        wh = self.windowHandle()
+        if wh is not None and wh.screen() is not screen:
+            wh.setScreen(screen)
+        self.setGeometry(rect)
+        self.update()
+        return rect
+
+    def _rect_for(self, geo):
         c = self.ov.cfg
         if c["style"] == "lights":
             hw, hh, glow = self._lights_box()
@@ -90,9 +103,7 @@ class SideMarker(QWidget):
                 x = geo.left() + int(c["edge_margin"]) - int(glow)
             else:
                 x = geo.right() + 1 - int(c["edge_margin"]) - w + int(glow)
-            self.setGeometry(x, cy - h // 2, w, h)
-            self.update()
-            return
+            return QRect(x, cy - h // 2, w, h)
         w = int(math.ceil(float(c["triangle_depth"]) * self._max_scale())) + 2 * self.PAD
         h = int(geo.height() * c["bar_height_frac"])
         h = max(h, int(float(c["triangle_height"]) * self._max_scale()) + 2 * self.PAD)
@@ -101,8 +112,7 @@ class SideMarker(QWidget):
             x = geo.left() + int(c["edge_margin"])
         else:
             x = geo.right() + 1 - int(c["edge_margin"]) - w
-        self.setGeometry(x, cy - h // 2, w, h)
-        self.update()
+        return QRect(x, cy - h // 2, w, h)
 
     def harden(self):
         winutil.add_ex_style(self, winutil.WS_EX_LAYERED | winutil.WS_EX_TRANSPARENT
@@ -273,6 +283,7 @@ class SideIndicatorOverlay(base.Overlay):
         "hotkey": "ctrl+shift+s",
         "test_hotkey": "ctrl+shift+t",
         "monitor": 0,
+        "monitor_id": "",        # the chosen monitor's identity, so it's found even if Windows reorders screens
         "style": "triangle",
         "lights_count": 3,
         "lights_shape": "round",
@@ -320,10 +331,26 @@ class SideIndicatorOverlay(base.Overlay):
         self.tracker = SideTracker(self.cfg["car_length_m"])
         self._read_colors()
         self.bars = [SideMarker("L", self), SideMarker("R", self)]
-        self._place()
+        self._last_placed = None
+        self._was_on_track = False
         for b in self.bars:
             b.show()
             b.harden()
+        self._place()
+        # Re-place whenever the screens change: a monitor switched on / off, a new primary,
+        # a resolution or scaling change, or a marker ending up on another screen. Windows
+        # sends several of these in a burst, so they're gathered and handled once.
+        self._replace_timer = QTimer(singleShot=True, interval=500)
+        self._replace_timer.timeout.connect(self._replace_now)
+        qt = QGuiApplication.instance()
+        qt.screenAdded.connect(self._screen_added)
+        qt.screenRemoved.connect(lambda *_: self._replace_soon())
+        qt.primaryScreenChanged.connect(lambda *_: self._replace_soon())
+        for scr in QGuiApplication.screens():
+            self._watch_screen(scr)
+        for b in self.bars:
+            if b.windowHandle() is not None:
+                b.windowHandle().screenChanged.connect(lambda *_: self._replace_soon())
 
     # ---- settings --------------------------------------------------------------
     def _read_colors(self):
@@ -332,20 +359,68 @@ class SideIndicatorOverlay(base.Overlay):
                        "near": _rgb(c["color_near"]), "unknown": _rgb(c["color_unknown"]),
                        "mark": _rgb(c["color_mark"], (255, 255, 255))}
 
-    def _screen_geo(self):
-        screens = QApplication.screens()
+    @staticmethod
+    def screen_id(scr):
+        """Something that identifies a physical monitor, not its place in the list."""
+        try:
+            parts = [scr.manufacturer(), scr.model(), scr.serialNumber()]
+        except Exception:
+            parts = []
+        ident = "|".join(p or "" for p in parts)
+        return ident if ident.strip("|") else "name:" + scr.name()
+
+    def _target_screen(self):
+        screens = QGuiApplication.screens()
+        if not screens:
+            return None
+        want = self.cfg.get("monitor_id") or ""
+        if want:
+            for i, scr in enumerate(screens):
+                if self.screen_id(scr) == want or "name:" + scr.name() == want:
+                    if int(self.cfg["monitor"]) != i:
+                        self.cfg["monitor"] = i          # keep the Settings list showing the right one
+                        self.app.save_config_soon()
+                    return scr
         i = int(self.cfg["monitor"])
-        s = screens[i] if 0 <= i < len(screens) else QApplication.primaryScreen()
-        return s.geometry()
+        return screens[i] if 0 <= i < len(screens) else QGuiApplication.primaryScreen()
 
     def _place(self):
-        geo = self._screen_geo()
+        scr = self._target_screen()
+        if scr is None:
+            return
+        rects = [b.place(scr) for b in self.bars]
         for b in self.bars:
-            b.place(geo)
+            b.harden()
+        where = (scr.name(), tuple((r.x(), r.y(), r.width(), r.height()) for r in rects))
+        if where != self._last_placed:
+            self._last_placed = where
+            g = scr.geometry()
+            print(f"[side_indicator] placed on {scr.name()} "
+                  f"({g.width()}x{g.height()} at {g.x()},{g.y()}, scale {scr.devicePixelRatio():g})")
+
+    def _replace_soon(self):
+        if getattr(self, "_replace_timer", None) is not None:
+            self._replace_timer.start()
+
+    def _replace_now(self):
+        self.app.call(self, "_place")
+
+    def _watch_screen(self, scr):
+        scr.geometryChanged.connect(lambda *_: self._replace_soon())
+        scr.logicalDotsPerInchChanged.connect(lambda *_: self._replace_soon())
+
+    def _screen_added(self, scr):
+        self._watch_screen(scr)
+        self._replace_soon()
 
     def apply_settings(self, key=None):
         self._read_colors()
         self.tracker.set_car_length(self.cfg["car_length_m"])
+        if key == "monitor":
+            screens = QGuiApplication.screens()
+            i = int(self.cfg["monitor"])
+            if 0 <= i < len(screens):
+                self.cfg["monitor_id"] = self.screen_id(screens[i])
         self._place()
 
     def settings_spec(self):
@@ -452,6 +527,11 @@ class SideIndicatorOverlay(base.Overlay):
         # or a test sweep / layout mode. Nothing at all is drawn otherwise.
         self.on_track = bool(self.cfg["enabled"] and not self.paused
                              and (ctx.visible or ctx.layout_mode or testing))
+        # Every time it's about to show (you go on track, test sweep, layout mode), place it
+        # again on the chosen monitor. Catches any screen change since the app started.
+        if self.on_track and not self._was_on_track:
+            self._place()
+        self._was_on_track = self.on_track
         if not self.cfg["enabled"]:
             pass
         elif ctx.layout_mode and self.layout_demo:
@@ -474,5 +554,7 @@ class SideIndicatorOverlay(base.Overlay):
             winutil.keep_topmost(b)
 
     def shutdown(self):
+        if getattr(self, "_replace_timer", None) is not None:
+            self._replace_timer.stop()
         for b in getattr(self, "bars", []):
             b.hide()
