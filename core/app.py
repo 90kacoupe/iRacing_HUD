@@ -21,6 +21,7 @@ from overlays import base, load_overlay_classes
 APP_DIR = paths.APP_DIR
 CONFIG_PATH = paths.CONFIG_PATH
 FPS = 60
+IDLE_MS = 250   # update rate while iRacing isn't running and nothing is animating (4 a second)
 
 DEFAULTS = {
     "general": {
@@ -120,6 +121,7 @@ class HudApp(QObject):
         self.last_top = 0.0
         self.timer = QTimer()
         self.timer.timeout.connect(self.tick)
+        self.fast = True
         self.timer.start(int(1000 / FPS))
         qt.aboutToQuit.connect(self._quitting)
         print("Sim Racing HUD running" + (" (demo)" if demo else "") +
@@ -231,6 +233,7 @@ class HudApp(QObject):
         ov, fn = self.hotkey_actions.get(name, (None, None))
         if fn is None or (ov and ov.failed):
             return
+        self.wake()
         try:
             fn()
         except Exception:
@@ -278,6 +281,7 @@ class HudApp(QObject):
             winutil.remove_startup()
 
     def setting_changed(self, section, key, kind):
+        self.wake()
         self.save_config_soon()
         if kind == "hotkey":
             self.rebind_hotkeys()
@@ -302,6 +306,7 @@ class HudApp(QObject):
         cfgmod.save(CONFIG_PATH, self.config)
 
     def set_layout_mode(self, on):
+        self.wake()
         self.layout_mode = bool(on)
         self.act_layout.setChecked(self.layout_mode)
         for ov in self.overlays:
@@ -345,6 +350,21 @@ class HudApp(QObject):
             self.last_top = now
             for ov in self.overlays:
                 self.call(ov, "keep_on_top")
+        # Full speed only while it matters: iRacing running, overlays up, or something
+        # animating (layout mode, a preview, a test sweep, a fade). Otherwise (the app sits in
+        # the tray all day from Windows start-up) it checks in 4 times a second.
+        fast = (frame.connected or self.visible or self.layout_mode or self.demo
+                or any(self.call(ov, "busy", now) for ov in self.overlays))
+        if fast != self.fast:
+            self.fast = fast
+            self.timer.setInterval(int(1000 / FPS) if fast else IDLE_MS)
+
+    def wake(self):
+        """Back to full speed straight away (a hotkey, button or setting may start a preview)."""
+        if not self.fast:
+            self.fast = True
+            self.timer.setInterval(int(1000 / FPS))
+            self.last = time.monotonic()
 
     def _quitting(self):
         self.save_timer.stop()

@@ -161,7 +161,14 @@ class DashOverlay(base.Overlay):
         frame = self.app.telemetry.latest()
         if not frame.connected:
             return json_response(b'{"connected": false}', 503)
-        return json_response(build_payload(frame, self.app.config["general"]["units"]))
+        units = self.app.config["general"]["units"]
+        cached = getattr(self, "_data_cache", None)          # (frame, units, body)
+        if cached and cached[0] is frame and cached[1] == units:
+            body = cached[2]                                   # same telemetry frame: same answer
+        else:
+            body = build_payload(frame, units)
+            self._data_cache = (frame, units, body)
+        return json_response(body)
 
     def _route_dash(self, query):
         car = self.app.telemetry.latest().session.get("car_path")

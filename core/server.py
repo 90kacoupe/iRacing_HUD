@@ -40,6 +40,12 @@ class HudServer:
         server = self
 
         class Handler(SimpleHTTPRequestHandler):
+            # Keep-alive: a dash page polls /data ~30 times a second. With HTTP/1.0 each poll
+            # was a new connection and a new server thread; now one connection (and one
+            # thread) serves them all. Every reply sends Content-Length, which this needs.
+            protocol_version = "HTTP/1.1"
+            timeout = 15          # close a connection nobody has used for 15 s
+
             def do_GET(self):
                 parts = urlsplit(self.path)
                 fn = server.routes.get(parts.path)

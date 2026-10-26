@@ -53,6 +53,8 @@ def self_test():
         import ui.settings  # noqa: F401
         import irsdk  # noqa: F401
         lines.append("settings and pyirsdk: ok")
+        from core.telemetry import yaml_reader
+        lines.append(f"session info reader: {yaml_reader()}")   # reported, not required
         # The dash is drawn natively; a web engine would bring back its own processes and GPU use.
         web = sorted(m for m in sys.modules if m.startswith("PySide6.QtWebEngine"))
         if web:

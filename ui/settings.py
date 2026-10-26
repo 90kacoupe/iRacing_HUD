@@ -128,7 +128,7 @@ class SettingsWindow(QWidget):
             return
         if t == "button":
             w = QPushButton(label)
-            w.clicked.connect(lambda *_: item["fn"]())
+            w.clicked.connect(lambda *_: (self.app.wake(), item["fn"]()))   # previews need smooth frames
             w.setToolTip(tip)
             form.addRow(w)
             return

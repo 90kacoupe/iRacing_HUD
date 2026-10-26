@@ -316,6 +316,9 @@ class TeamBoardOverlay(base.Overlay):
         elif self.win.isVisible():
             self.win.hide()
 
+    def busy(self, now):
+        return now < self.preview_until or self.alpha > 0 or self.win.flash > 0
+
     def keep_on_top(self):
         winutil.keep_topmost(self.win)
 

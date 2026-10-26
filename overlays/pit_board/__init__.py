@@ -411,6 +411,9 @@ class PitBoardOverlay(base.Overlay):
         elif self.win.isVisible():
             self.win.hide()
 
+    def busy(self, now):
+        return now < self.preview_until or self.alpha > 0
+
     def keep_on_top(self):
         winutil.keep_topmost(self.win)
 

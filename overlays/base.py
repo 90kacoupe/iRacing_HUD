@@ -36,11 +36,14 @@ class Overlay:
         return self.app.config[self.id]
 
     def start(self): ...                       # make windows
-    def tick(self, frame, ctx): ...            # ~60 times a second
+    def tick(self, frame, ctx): ...            # ~60 times a second (4 while idle, see busy)
     def settings_spec(self): return []         # rows for its settings tab (see helpers below)
     def apply_settings(self, key=None): ...    # a setting changed (key None = several / general)
     def hotkeys(self): return {}               # {action name: (config key, function)}
     def build_tray(self, menu): ...            # add entries to the tray menu
+    def busy(self, now): return False          # True while animating (preview, test sweep, fade):
+                                               # keeps 60 frames a second with iRacing closed,
+                                               # otherwise the app idles at 4 a second
     def keep_on_top(self): ...                 # every 2 s
     def on_session_end(self): ...              # iRacing closed / left the session
     def on_layout_mode(self, on): ...

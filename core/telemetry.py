@@ -34,10 +34,74 @@ def parse_track_length_m(text):
         return 0.0
 
 
-def read_session(ir):
-    """Things that only change between sessions."""
+DRIVERS_EVERY_S = 10.0   # the driver list (names, numbers, classes) is re-read at most this often
+
+
+def yaml_reader():
+    """Which YAML reader pyirsdk uses for the session info: the fast one is ~7x quicker."""
+    try:
+        import irsdk
+        fast = getattr(irsdk, "YamlSafeLoader", None).__name__ == "CSafeLoader"
+        return "fast (libyaml)" if fast else "slow (pure Python)"
+    except Exception as e:
+        return f"unknown ({e!r})"
+
+
+def session_key(ir):
+    """Changes when a new session starts (practice -> qualifying -> race, or a new event)."""
+    return (_get(ir, "SessionUniqueID"), _get(ir, "SessionNum"))
+
+
+def read_session(ir, prev=None, drivers_due=True):
+    """Things that only change between sessions.
+
+    iRacing rewrites its session info often during a race (results, incident counts), and
+    every section read means parsing a lot of YAML (tens of ms for a full field, during which
+    the overlays wait). So only re-read what's needed: the session type and track only when
+    the session changes, and the driver list only when `drivers_due` (at most every
+    DRIVERS_EVERY_S). `prev` is the last result.
+    """
     s = {"car_path": None, "car_name": None, "shift": {}, "rain_var": None,
-         "all_vars": [], "track_len_m": 0.0, "drivers": {}, "est_lap_s": 0.0, "session_type": ""}
+         "all_vars": [], "track_len_m": 0.0, "drivers": {}, "est_lap_s": 0.0, "session_type": "",
+         "session_key": session_key(ir)}
+    new_session = not prev or prev.get("session_key") != s["session_key"]
+    driver_keys = ("car_path", "car_name", "shift", "est_lap_s", "drivers")
+    if not new_session and not drivers_due and prev.get("car_path"):
+        for k in driver_keys:
+            s[k] = prev[k]
+    else:
+        _read_drivers(ir, s)
+    if not new_session and prev.get("session_type"):
+        s["session_type"] = prev["session_type"]
+    else:
+        try:
+            num = s["session_key"][1]
+            for sess in (ir["SessionInfo"] or {}).get("Sessions") or []:
+                if sess.get("SessionNum") == num:
+                    s["session_type"] = str(sess.get("SessionType") or "")
+                    break
+        except Exception:
+            pass
+    if not new_session and prev.get("track_len_m"):
+        s["track_len_m"] = prev["track_len_m"]
+    else:
+        try:
+            s["track_len_m"] = parse_track_length_m((ir["WeekendInfo"] or {}).get("TrackLength", ""))
+        except Exception:
+            pass
+    try:
+        names = sorted(getattr(ir, "_var_headers_dict", {}) or {})
+        s["all_vars"] = names
+        for n in names:
+            if re.search(r"rain.?light", n, re.I):
+                s["rain_var"] = n
+                break
+    except Exception:
+        pass
+    return s
+
+
+def _read_drivers(ir, s):
     try:
         info = ir["DriverInfo"] or {}
         me = info.get("DriverCarIdx")
@@ -56,28 +120,6 @@ def read_session(ir):
         s["drivers"] = drivers_from_info(info)
     except Exception:
         pass
-    try:
-        num = ir["SessionNum"]
-        for sess in (ir["SessionInfo"] or {}).get("Sessions") or []:
-            if sess.get("SessionNum") == num:
-                s["session_type"] = str(sess.get("SessionType") or "")
-                break
-    except Exception:
-        pass
-    try:
-        s["track_len_m"] = parse_track_length_m((ir["WeekendInfo"] or {}).get("TrackLength", ""))
-    except Exception:
-        pass
-    try:
-        names = sorted(getattr(ir, "_var_headers_dict", {}) or {})
-        s["all_vars"] = names
-        for n in names:
-            if re.search(r"rain.?light", n, re.I):
-                s["rain_var"] = n
-                break
-    except Exception:
-        pass
-    return s
 
 
 def _get(ir, name):
@@ -113,9 +155,10 @@ class IRacingTelemetry:
 
     def _run(self):
         import irsdk
+        print("session info reader:", yaml_reader())
         ir = irsdk.IRSDK()
         connected = False
-        session, last_info, last_read = {}, None, 0.0
+        session, last_info, last_read, last_drivers = {}, None, 0.0, 0.0
         errors = 0
         while True:
             try:
@@ -134,8 +177,14 @@ class IRacingTelemetry:
                 ir.freeze_var_buffer_latest()
                 try:
                     upd = getattr(ir, "session_info_update", None)
-                    if upd != last_info or time.time() - last_read > 10:
-                        session, last_info, last_read = read_session(ir), upd, time.time()
+                    now = time.time()
+                    if (upd != last_info or now - last_read > 10
+                            or session.get("session_key") != session_key(ir)):
+                        due = now - last_drivers >= DRIVERS_EVERY_S
+                        session = read_session(ir, session, drivers_due=due)
+                        last_info, last_read = upd, now
+                        if due:
+                            last_drivers = now
                     names = self.var_names
                     if session.get("rain_var"):
                         names = names | {session["rain_var"]}

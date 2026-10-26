@@ -549,6 +549,9 @@ class SideIndicatorOverlay(base.Overlay):
         self.bars[0].step(ctx.dt, left)
         self.bars[1].step(ctx.dt, right)
 
+    def busy(self, now):
+        return now < self.test_until or any(b.alpha > 0 for b in self.bars)
+
     def keep_on_top(self):
         for b in self.bars:
             winutil.keep_topmost(b)
