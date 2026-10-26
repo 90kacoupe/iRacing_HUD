@@ -111,6 +111,10 @@ Everything is in the Settings window and applies straight away. It's saved to
 `%APPDATA%\SimRacingHUD\config.json` (the **Open settings folder** button in Settings goes there),
 so updates never touch it. Delete that file to go back to the defaults.
 
+**Light on your PC:** the HUD is built to stay out of iRacing's way. *General → Let iRacing have the
+CPU first* (on by default) runs it at below-normal priority, so when the CPU is busy Windows always
+serves iRacing first. With iRacing closed it idles at 4 updates a second.
+
 ## Files
 | File | What it's for |
 |---|---|

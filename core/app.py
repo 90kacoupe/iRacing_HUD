@@ -32,6 +32,7 @@ DEFAULTS = {
         "settings_hotkey": "",
         "check_updates": True,            # look for a new version on GitHub now and then
         "skip_version": "",               # a version the user chose to skip
+        "low_priority": True,             # let iRacing have the CPU first when it's busy
     },
     "server": {
         "allow_network": False,           # True: open the dash from a phone / tablet / dash screen
@@ -70,6 +71,7 @@ class HudApp(QObject):
         self.demo = demo
         self.layout_mode = False
         self.settings_win = None
+        self.apply_priority()         # before any threads start (they'd follow anyway)
         self.icon = make_icon()
         self.qt.setWindowIcon(self.icon)
 
@@ -254,6 +256,10 @@ class HudApp(QObject):
                          "How long you need to be off track before overlays hide"),
             base.choice("units", "Units", [("auto", "Same as iRacing"), ("metric", "Metric"),
                                            ("imperial", "Imperial")]),
+            base.check("low_priority", "Let iRacing have the CPU first",
+                       "Runs the HUD at below-normal priority. When the CPU is busy, iRacing is "
+                       "always served first and the overlays use what's left. "
+                       "With spare CPU it makes no difference."),
             base.header("Hotkeys"),
             base.hotkey("layout_hotkey", "Layout mode (move / resize)"),
             base.hotkey("settings_hotkey", "Open settings"),
@@ -280,9 +286,17 @@ class HudApp(QObject):
         else:
             winutil.remove_startup()
 
+    def apply_priority(self):
+        on = bool(self.config["general"]["low_priority"])
+        if winutil.set_low_priority(on) or winutil.IS_WINDOWS:
+            print(f"process priority: {winutil.priority_name() or '?'} "
+                  f"(\"Let iRacing have the CPU first\" is {'on' if on else 'off'})")
+
     def setting_changed(self, section, key, kind):
         self.wake()
         self.save_config_soon()
+        if section == "general" and key == "low_priority":
+            self.apply_priority()
         if kind == "hotkey":
             self.rebind_hotkeys()
             return

@@ -48,6 +48,38 @@ def keep_topmost(widget):
     ctypes.windll.user32.SetWindowPos(int(widget.winId()), -1, 0, 0, 0, 0, flags)  # HWND_TOPMOST
 
 
+# ---------------------------------------------------------------- process priority
+NORMAL_PRIORITY_CLASS = 0x0020
+BELOW_NORMAL_PRIORITY_CLASS = 0x4000
+
+
+def _THIS_PROCESS():
+    """GetCurrentProcess()'s pseudo-handle, which is always (HANDLE)-1."""
+    import ctypes
+    return ctypes.c_void_p(-1)
+
+
+def set_low_priority(on):
+    """Below-normal priority: when the CPU is busy, Windows always runs iRacing first and the
+    HUD gets what's left. With spare CPU it changes nothing. Applies to every thread of this
+    process at once, and to anything it starts. Returns True if Windows accepted it."""
+    if not IS_WINDOWS:
+        return False
+    import ctypes
+    cls = BELOW_NORMAL_PRIORITY_CLASS if on else NORMAL_PRIORITY_CLASS
+    return bool(ctypes.windll.kernel32.SetPriorityClass(_THIS_PROCESS(), cls))
+
+
+def priority_name():
+    """The process's priority class in words (for hud.log), or '' when not on Windows."""
+    if not IS_WINDOWS:
+        return ""
+    import ctypes
+    cls = ctypes.windll.kernel32.GetPriorityClass(_THIS_PROCESS())
+    return {NORMAL_PRIORITY_CLASS: "normal", BELOW_NORMAL_PRIORITY_CLASS: "below normal",
+            0x0040: "idle", 0x8000: "above normal", 0x0080: "high"}.get(cls, hex(cls))
+
+
 # ---------------------------------------------------------------- start with Windows
 STARTUP_NAME = "Sim Racing HUD.lnk"
 STARTUP_BAT = "Sim Racing HUD.bat"          # fallback if a shortcut can't be made
