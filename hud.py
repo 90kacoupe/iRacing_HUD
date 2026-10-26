@@ -40,7 +40,7 @@ def setup_log():
 
 
 def self_test():
-    """Exit code 0 if every overlay (and the web view the dash needs) loads. Writes self-test.txt
+    """Exit code 0 if every overlay loads (and no web engine sneaks back in). Writes self-test.txt
     next to the exe, because the installed app has no console."""
     lines, ok = [], True
     try:
@@ -50,10 +50,16 @@ def self_test():
         if errors or len(classes) != len(OVERLAYS):
             ok = False
             lines.append(f"overlays FAILED: {errors}")
-        import PySide6.QtWebEngineWidgets  # noqa: F401
         import ui.settings  # noqa: F401
         import irsdk  # noqa: F401
-        lines.append("Qt web view, settings and pyirsdk: ok")
+        lines.append("settings and pyirsdk: ok")
+        # The dash is drawn natively; a web engine would bring back its own processes and GPU use.
+        web = sorted(m for m in sys.modules if m.startswith("PySide6.QtWebEngine"))
+        if web:
+            ok = False
+            lines.append(f"web engine loaded, but nothing should need it: {web}")
+        else:
+            lines.append("no web engine loaded: ok")
     except Exception:
         ok = False
         lines.append(traceback.format_exc())

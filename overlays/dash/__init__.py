@@ -1,19 +1,20 @@
-"""Replica in-car dash: an HTML page per car in dashes/, shown in an always-on-top window.
+"""Replica in-car dash, drawn natively (native.py) in an always-on-top window.
 
-The page reads telemetry from /data on the app's local web server, so the same
-pages also work in a browser or on a separate dash screen.
+The same dash also exists as an HTML page per car in dashes/, served by the app's local
+web server (/dash, reading /data), for a browser, phone or separate dash screen. The
+overlay window doesn't use those pages, so no web engine runs while you drive.
 """
 import webbrowser
 
-from PySide6.QtCore import Qt, QRect, QUrl
+from PySide6.QtCore import Qt, QRect
 from PySide6.QtGui import QAction, QColor, QPainter, QPen, QFont, QGuiApplication
-from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QWidget, QMenu
 
 from core import winutil
 from core.server import json_response, redirect
 from overlays import base
-from .payload import VARS, DASHES_DIR, build_payload, dash_file_for
+from .native import DashState, DemoDash, NativeDash, debug_lines, layout_for
+from .payload import VARS, DASHES_DIR, build_data, build_payload, dash_file_for
 
 
 class GrabLayer(QWidget):
@@ -82,14 +83,12 @@ class DashWindow(QWidget):
         self.ov = overlay
         self.setWindowTitle("Sim Racing HUD - dash")
         self.setAttribute(Qt.WA_ShowWithoutActivating)
-        self.setStyleSheet("background: #000;")
+        self.setAttribute(Qt.WA_OpaquePaintEvent)
+        self.dash = NativeDash(self)
         self.aspect = None
-        self.view = QWebEngineView(self)
-        self.view.setContextMenuPolicy(Qt.NoContextMenu)
-        self.view.page().setBackgroundColor(QColor(0, 0, 0))
-        self.view.loadFinished.connect(self._loaded)
         self.grab_layer = GrabLayer(self)
         self.restore()
+        self.set_layout(self.dash.layout_cls)
 
     # ---- geometry ----------------------------------------------------------------
     def restore(self):
@@ -116,7 +115,7 @@ class DashWindow(QWidget):
         self.remember()
 
     def resizeEvent(self, e):
-        self.view.setGeometry(self.rect())
+        self.dash.setGeometry(self.rect())
         self.grab_layer.setGeometry(self.rect())
         self.grab_layer.raise_()
         super().resizeEvent(e)
@@ -125,34 +124,15 @@ class DashWindow(QWidget):
         super().showEvent(e)
         winutil.add_ex_style(self, winutil.WS_EX_NOACTIVATE | winutil.WS_EX_TOOLWINDOW)
 
-    # ---- page --------------------------------------------------------------------
-    def load(self, url):
-        self.view.load(QUrl(url))
-
-    def _loaded(self, ok):
-        if not ok:
-            return
-        # The page knows its own shape; size the window to match (no empty bars).
-        self.view.page().runJavaScript(
-            "(typeof DASH_W === 'undefined' ? 0 : DASH_W) + 'x' + (typeof DASH_H === 'undefined' ? 0 : DASH_H)",
-            0, self._got_shape)
-        if self.ov.debug:
-            self.ov.set_debug(True)
-
-    def _got_shape(self, result):
-        try:
-            w, h = (float(n) for n in str(result).split("x"))
-        except Exception:
-            return
-        if w > 0 and h > 0:
-            self.aspect = h / w
-            want = int(self.width() * self.aspect)
-            if abs(self.height() - want) > 2:
-                self.resize(self.width(), want)
-                self.remember()
-
-    def run_js(self, js):
-        self.view.page().runJavaScript(js, 0, lambda *_: None)
+    # ---- which car's dash ------------------------------------------------------------
+    def set_layout(self, layout_cls):
+        """Use this car's dash and keep the window the dash's shape (no empty bars)."""
+        self.dash.set_layout(layout_cls)
+        self.aspect = layout_cls.H / layout_cls.W
+        want = int(self.width() * self.aspect)
+        if abs(self.height() - want) > 2:
+            self.resize(self.width(), want)
+            self.remember()
 
 
 class DashOverlay(base.Overlay):
@@ -165,7 +145,9 @@ class DashOverlay(base.Overlay):
         self.override = None    # "hide" / "show" from the hotkey, until pressed again or iRacing closes
         self.debug = False
         self.shown = False
-        self.dash_file = None
+        self.car_path = None
+        self.state = DashState()
+        self.demo = None        # DemoDash in demo mode / layout mode
         s = self.app.server
         s.route("/data", self._route_data)
         s.route("/dash", self._route_dash)
@@ -173,7 +155,6 @@ class DashOverlay(base.Overlay):
         s.route("/vars", self._route_vars)
         s.mount("/dashes/", DASHES_DIR)
         self.win = DashWindow(self)
-        self._reload()
 
     # ---- web routes (run on the server thread) -------------------------------------
     def _route_data(self, query):
@@ -196,16 +177,11 @@ class DashOverlay(base.Overlay):
 
     # ---- page --------------------------------------------------------------------
     def page_url(self):
+        """The HTML version of the dash, for a browser or another device."""
         return self.app.server.url("/dash") + ("?demo" if self.app.demo else "")
-
-    def _reload(self):
-        if self.app.server_ok:
-            self.win.load(self.page_url())
 
     def set_debug(self, on):
         self.debug = on
-        self.win.run_js("DEBUG = %s; if (!DEBUG) { var d = document.getElementById('debug');"
-                        " if (d) d.style.display = 'none'; }" % ("true" if on else "false"))
 
     def toggle_debug(self):
         self.set_debug(not self.debug)
@@ -246,9 +222,10 @@ class DashOverlay(base.Overlay):
             base.note("Move it by dragging, resize with the mouse wheel. Right-click it for more."),
             base.button("Reset size and position", self.reset_position),
             base.button("Debug view on / off", self.toggle_debug),
-            base.header("Dash pages"),
-            base.note("One page per car in the dashes folder, named after iRacing's car path "
-                      "(e.g. ligierjsp320.html). default.html is used for every other car."),
+            base.header("Browser and dash-screen pages"),
+            base.note("The overlay draws the dash itself. The same dash is also available as a web "
+                      "page (one per car in the dashes folder, named after iRacing's car path; "
+                      "default.html for every other car) for a browser, phone or dash screen."),
             base.button("Open the dashes folder", lambda: winutil.open_path(DASHES_DIR)),
             base.button("Show the current car's path", lambda: webbrowser.open(self.app.server.url("/car"))),
             base.button("Open the dash in a browser", lambda: webbrowser.open(self.page_url())),
@@ -256,14 +233,24 @@ class DashOverlay(base.Overlay):
 
     # ---- every frame -------------------------------------------------------------
     def tick(self, frame, ctx):
-        f = dash_file_for(frame.session.get("car_path"))
-        if f != self.dash_file:
-            if self.dash_file is not None:
-                self._reload()             # /dash redirects to the new car's page
-            self.dash_file = f
+        car = frame.session.get("car_path")
+        if car != self.car_path:                       # new car: its dash, fresh fuel figures
+            self.car_path = car
+            self.win.set_layout(layout_for(car))
+            self.state.reset()
 
-        want = bool(self.cfg["enabled"] and self.app.server_ok and (
+        want = bool(self.cfg["enabled"] and (
             ctx.layout_mode or self.override == "show" or (self.override != "hide" and ctx.visible)))
+        if want:
+            # Only does any work while the dash is on screen.
+            if ctx.demo or (ctx.layout_mode and not frame.connected):
+                self.demo = self.demo or DemoDash(ctx.now)
+                data = self.demo.read(ctx.now)
+            else:
+                self.demo = None
+                data = build_data(frame, self.app.config["general"]["units"]) if frame.connected else None
+            self.win.dash.show_state(self.state.compute(data, self.win.dash.layout_cls, ctx.now),
+                                     debug_lines(data) if self.debug else None)
         if want != self.shown:
             self.shown = want
             if want:

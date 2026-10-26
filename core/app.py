@@ -5,7 +5,6 @@ import time
 import traceback
 import urllib.request
 
-from PySide6 import QtWebEngineWidgets  # noqa: F401  (must be imported before QApplication exists)
 from PySide6.QtCore import QObject, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -375,7 +374,6 @@ def run(demo=False):
             print("The HUD is already running (see the tray icon).")
         return 0
 
-    QApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
     qt = QApplication.instance() or QApplication(sys.argv)
     qt.setApplicationName("Sim Racing HUD")
     qt.setQuitOnLastWindowClosed(False)

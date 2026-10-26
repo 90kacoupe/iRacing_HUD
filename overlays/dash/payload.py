@@ -1,4 +1,5 @@
-"""Telemetry -> the JSON the dash pages read from /data (same fields as the old dash_overlay.py)."""
+"""Telemetry -> the dash values: a dict for the overlay's native dash, and the JSON the
+HTML dash pages read from /data (same fields as the old dash_overlay.py)."""
 import json
 import os
 import re
@@ -14,6 +15,12 @@ VARS = ("DisplayUnits", "Gear", "Speed", "FuelLevel", "OilPress", "WaterTemp",
 
 
 def build_payload(frame, units_setting="auto"):
+    """The /data JSON for the HTML dash pages (browsers and dash screens)."""
+    return json.dumps(build_data(frame, units_setting)).encode()
+
+
+def build_data(frame, units_setting="auto"):
+    """The dash values as a dict: used by the overlay's native dash and by /data."""
     v = frame.vars.get
     units = units_setting
     if units == "auto":
@@ -60,7 +67,7 @@ def build_payload(frame, units_setting="auto"):
     if rain:
         data["dcRainLight"] = v(rain)
     data.update(frame.session.get("shift", {}))
-    return json.dumps(data).encode()
+    return data
 
 
 def dash_file_for(car_path):

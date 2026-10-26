@@ -24,7 +24,9 @@ a = Analysis(
     pathex=[ROOT],
     datas=[(os.path.join(ROOT, "overlays", "dash", "dashes"), os.path.join("overlays", "dash", "dashes"))],
     hiddenimports=hidden,
-    excludes=["tkinter"],
+    # The dash is drawn natively, so leave Qt's web engine (a whole Chromium) out of the installer.
+    excludes=["tkinter", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
+              "PySide6.QtWebEngineQuick", "PySide6.QtWebChannel"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

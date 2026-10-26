@@ -120,10 +120,13 @@ so updates never touch it. Delete that file to go back to the defaults.
 | `HUD Troubleshoot.bat` | restart with a console that shows errors |
 | `Remove from startup.bat` | stop it starting with Windows |
 | `%APPDATA%\SimRacingHUD\hud.log` | errors from the background copy |
-| `overlays/dash/dashes/` | one dash page per car (named after iRacing's car path) plus `default.html` |
+| `overlays/dash/native.py` | the dash as the overlay draws it (one layout per car) |
+| `overlays/dash/dashes/` | the same dash as a web page per car (named after iRacing's car path) plus `default.html` |
 
-The dash pages still work in a browser: `http://127.0.0.1:8765/dash` (add `?demo` to preview).
-For a dash screen on another device, tick **Network → Let other devices open the dash** and restart.
+The overlay draws the dash itself and only redraws the numbers that change, so no web browser
+engine runs while you drive. The web-page version is for other screens: open
+`http://127.0.0.1:8765/dash` in a browser (add `?demo` to preview). For a dash screen on another
+device, tick **Network → Let other devices open the dash** and restart.
 
 ## If something goes wrong
 - One overlay hitting an error doesn't stop the others. You'll get a tray message and the details go
