@@ -1,9 +1,13 @@
 """Replica in-car dash, drawn natively (native.py) in an always-on-top window.
 
+Which dash each car gets (or none) is set in Settings -> Dash -> Dash per car (cars_ui.py),
+saved as config["dash"]["cars"] {car path: {"name", "dash"}} and ["default_dash"].
+
 The same dash also exists as an HTML page per car in dashes/, served by the app's local
 web server (/dash, reading /data), for a browser, phone or separate dash screen. The
 overlay window doesn't use those pages, so no web engine runs while you drive.
 """
+import copy
 import webbrowser
 
 from PySide6.QtCore import Qt, QRect
@@ -13,7 +17,9 @@ from PySide6.QtWidgets import QWidget, QMenu
 from core import winutil
 from core.server import json_response, redirect
 from overlays import base
-from .native import DashState, DemoDash, NativeDash, debug_lines, layout_for
+from .cars_ui import CarDashList
+from .native import (DEMO_LAYOUT, STARTER_CARS, USE_DEFAULT, DashState, DemoDash, NativeDash,
+                     debug_lines, layout_for)
 from .payload import VARS, DASHES_DIR, build_data, build_payload, dash_file_for
 
 
@@ -138,7 +144,9 @@ class DashWindow(QWidget):
 class DashOverlay(base.Overlay):
     id = "dash"
     title = "Dash"
-    DEFAULTS = {"enabled": True, "hotkey": "ctrl+shift+d", "x": None, "y": None, "width": 800, "height": 507}
+    DEFAULTS = {"enabled": True, "hotkey": "ctrl+shift+d", "x": None, "y": None, "width": 800, "height": 507,
+                "default_dash": "none",   # cars without their own choice get no dash
+                "cars": None}             # {car path: {"name", "dash"}}; None = not set up yet
     VARS = VARS
 
     def start(self):
@@ -146,6 +154,11 @@ class DashOverlay(base.Overlay):
         self.debug = False
         self.shown = False
         self.car_path = None
+        self.layout = None      # this car's Layout class, None = no dash for this car
+        self.car_lists = []     # open "Dash per car" lists, refreshed when a new car turns up
+        if not isinstance(self.cfg.get("cars"), dict):      # first start with per-car dashes
+            self.cfg["cars"] = copy.deepcopy(STARTER_CARS)
+            self.app.save_config_soon()
         self.state = DashState()
         self.demo = None        # DemoDash in demo mode / layout mode
         s = self.app.server
@@ -220,9 +233,54 @@ class DashOverlay(base.Overlay):
     def on_layout_mode(self, on):
         self.win.grab_layer.update()
 
+    # ---- which dash for which car -------------------------------------------------
+    def _remember_car(self, frame):
+        """Put the car you're driving on the Dash per car list (once), with its name."""
+        path = self.car_path
+        if not path or self.app.demo or not frame.connected:
+            return
+        cars = self.cfg["cars"]
+        name = frame.session.get("car_name") or path
+        entry = cars.get(path)
+        if entry is None:
+            cars[path] = {"name": name, "dash": USE_DEFAULT}
+            print(f"[dash] new car on the dash list: {name} ({path})")
+        elif entry.get("name") != name:
+            entry["name"] = name
+        else:
+            return
+        self.app.save_config_soon()
+
+    def _pick_layout(self):
+        self.layout = layout_for(self.car_path, self.cfg["cars"], self.cfg["default_dash"])
+
+    def cars_changed(self):
+        """A per-car choice changed in Settings: save and switch now."""
+        self._pick_layout()
+        self.app.save_config_soon()
+        self.app.wake()
+
+    def _refresh_car_lists(self):
+        alive = []
+        for view in self.car_lists:
+            try:
+                view.refresh()
+                alive.append(view)
+            except RuntimeError:          # its window was closed and deleted
+                pass
+        self.car_lists = alive
+
+    def _make_car_list(self):
+        view = CarDashList(self)
+        self.car_lists.append(view)
+        return view
+
     def settings_spec(self):
         return [
             base.check("enabled", "Use the dash"),
+            base.header("Dash per car"),
+            base.widget(self._make_car_list),
+            base.header("Position and keys"),
             base.hotkey("hotkey", "Hide / show hotkey",
                         "Hides the dash until you press it again or leave iRacing. "
                         "Outside a session it shows the dash, handy for positioning."),
@@ -240,14 +298,24 @@ class DashOverlay(base.Overlay):
 
     # ---- every frame -------------------------------------------------------------
     def tick(self, frame, ctx):
-        car = frame.session.get("car_path")
+        car = frame.session.get("car_path") if frame.connected else None
         if car != self.car_path:                       # new car: its dash, fresh fuel figures
             self.car_path = car
-            self.win.set_layout(layout_for(car))
+            self._remember_car(frame)
+            self._pick_layout()
             self.state.reset()
+            self._refresh_car_lists()
 
-        want = bool(self.cfg["enabled"] and (
+        # The dash to draw: this car's, or (with no dash for it) the LMP3 one only while
+        # positioning it (layout mode), outside iRacing (hotkey "show") and in demo mode.
+        layout = self.layout
+        if layout is None and (ctx.demo or ctx.layout_mode or not frame.connected):
+            layout = DEMO_LAYOUT
+        want = bool(self.cfg["enabled"] and layout is not None and (
             ctx.layout_mode or self.override == "show" or (self.override != "hide" and ctx.visible)))
+        if want and layout is not self.win.dash.layout_cls:
+            self.win.set_layout(layout)
+            self.state.reset()
         if want:
             # Only does any work while the dash is on screen.
             if ctx.demo or (ctx.layout_mode and not frame.connected):

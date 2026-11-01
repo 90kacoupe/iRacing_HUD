@@ -12,7 +12,8 @@ This draws the same dash directly instead:
 The HTML pages in dashes/ are unchanged and still serve browsers and dash screens.
 
 Each car's dash is a Layout: fixed positions in an 800-wide canvas, copied from its HTML
-page. LAYOUTS maps iRacing car paths to them; DEFAULT_LAYOUT covers every other car.
+page. DASH_LAYOUTS lists them by id; which car gets which (or no dash at all) is the
+user's choice in Settings -> Dash -> Dash per car (see dash_choice / layout_for).
 """
 import math
 
@@ -191,6 +192,7 @@ class Layout:
 
 class Lmp3Layout(Layout):
     """Ligier JS P320 (LMP3); positions from dashes/ligierjsp320.html."""
+    NAME = "LMP3 (Ligier JS P320)"
     B = "#a9a9a9"
 
     pages = {
@@ -273,12 +275,30 @@ class Lmp3Layout(Layout):
     }
 
 
-LAYOUTS = {"ligierjsp320": Lmp3Layout}
-DEFAULT_LAYOUT = Lmp3Layout          # dashes/default.html is the LMP3 dash too
+# ---- which dash for which car --------------------------------------------------------
+# Dash layouts the user can assign, by id (the id is what config.json stores).
+# A new dash = a Layout class with a NAME, added here.
+DASH_LAYOUTS = {"lmp3": Lmp3Layout}
+NO_DASH = "none"            # a car (or every unassigned car) with no overlay dash
+USE_DEFAULT = "default"     # a car that follows "Every other car"
+DEMO_LAYOUT = Lmp3Layout    # shown in demo mode, and in layout mode when the car has no dash
+
+# First run of this version: the LMP3 keeps its dash; every other car starts with none.
+STARTER_CARS = {"ligierjsp320": {"name": "Ligier JS P320", "dash": "lmp3"}}
 
 
-def layout_for(car_path):
-    return LAYOUTS.get(car_path or "", DEFAULT_LAYOUT)
+def dash_choice(car_path, cars, default):
+    """The dash id for this car: its own choice, else the default, else no dash.
+    An id that no longer exists counts as no dash."""
+    choice = ((cars or {}).get(car_path or "") or {}).get("dash", USE_DEFAULT)
+    if choice == USE_DEFAULT:
+        choice = default
+    return choice if choice in DASH_LAYOUTS else NO_DASH
+
+
+def layout_for(car_path, cars, default):
+    """The Layout class for this car, or None for no dash."""
+    return DASH_LAYOUTS.get(dash_choice(car_path, cars, default))
 
 
 # ---- values -------------------------------------------------------------------------
@@ -366,7 +386,7 @@ class NativeDash(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WA_OpaquePaintEvent)     # we paint every pixel: no background fill
-        self.layout_cls = DEFAULT_LAYOUT
+        self.layout_cls = DEMO_LAYOUT
         self.state = None
         self.debug_lines = None
         self._static = None           # (key, QPixmap) of boxes and labels for the current page

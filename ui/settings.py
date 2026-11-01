@@ -126,6 +126,9 @@ class SettingsWindow(QWidget):
             lab.setStyleSheet("color: gray;")
             form.addRow(lab)
             return
+        if t == "widget":
+            form.addRow(item["make"]())
+            return
         if t == "button":
             w = QPushButton(label)
             w.clicked.connect(lambda *_: (self.app.wake(), item["fn"]()))   # previews need smooth frames

@@ -49,6 +49,16 @@ draws over every overlay.
 
 A hotkey hide lasts until you press it again or close iRacing. Change any hotkey in Settings.
 
+## Which cars get a dash
+**Settings → Dash → Dash per car.** Every car you drive is added to the list the first time you
+drive it. For each one pick a dash layout, **No dash**, or **Default** (follows *Every other car*).
+*Every other car* starts as **No dash**, so the dash only appears in cars you've given one (the
+Ligier JS P320 / LMP3 starts with its LMP3 dash). Changes apply straight away. Good for cars whose
+in-sim dash isn't on the wheel, like the Corvette GT3: leave them on No dash.
+
+With no dash for the car, the hide/show hotkey does nothing; layout mode still shows the dash so
+you can place it.
+
 ## Moving things
 - **Dash:** drag it to move, mouse wheel to resize. Right-click it for more.
   Clicking it never takes focus away from iRacing.
@@ -124,7 +134,8 @@ serves iRacing first. With iRacing closed it idles at 4 updates a second.
 | `HUD Troubleshoot.bat` | restart with a console that shows errors |
 | `Remove from startup.bat` | stop it starting with Windows |
 | `%APPDATA%\SimRacingHUD\hud.log` | errors from the background copy |
-| `overlays/dash/native.py` | the dash as the overlay draws it (one layout per car) |
+| `overlays/dash/native.py` | the dash as the overlay draws it (one layout per dash, listed in `DASH_LAYOUTS`) |
+| `overlays/dash/cars_ui.py` | the Dash per car list in Settings |
 | `overlays/dash/dashes/` | the same dash as a web page per car (named after iRacing's car path) plus `default.html` |
 
 The overlay draws the dash itself and only redraws the numbers that change, so no web browser

@@ -98,3 +98,9 @@ def button(label, fn, tip=""):
 def toggle(label, get, set, tip=""):
     """A checkbox backed by functions instead of a config value."""
     return {"type": "toggle", "label": label, "get": get, "set": set, "tip": tip}
+
+
+def widget(make):
+    """A custom row: make() returns a QWidget, shown full width (for settings a plain
+    row can't express, such as the dash's per-car list)."""
+    return {"type": "widget", "make": make}
